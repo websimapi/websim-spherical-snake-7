@@ -80,9 +80,6 @@ export class FoodManager {
     }
 
     update(moveDist, snakeTailPos, rippleFn) {
-        // Pulse main food
-        this.food.scale.setScalar(1 + Math.sin(Date.now() * 0.01) * 0.2);
-
         // Apply Ripple Physics to Food
         if (rippleFn) {
             this.applyRippleToFood(this.food, rippleFn);

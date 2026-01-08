@@ -255,12 +255,12 @@ export class Game {
         this.rippleUniforms.uRippleStartTimes.value[idx] = this.time;
         
         // Intensity logic based on hold duration
-        // Short tap (<200ms) -> 0.3
-        // Long tap (>600ms) -> 0.8
-        let intensity = 0.3;
+        // Short tap (<200ms) -> 0.15
+        // Long tap (>600ms) -> 0.45
+        let intensity = 0.15;
         if (durationMs > 200) {
             const factor = Math.min((durationMs - 200) / 400, 1.0);
-            intensity = 0.3 + factor * 0.5;
+            intensity = 0.15 + factor * 0.3;
         }
         
         this.rippleUniforms.uRippleIntensities.value[idx] = intensity;

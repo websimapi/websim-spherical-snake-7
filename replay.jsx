@@ -242,10 +242,10 @@ const ReplayScene = ({ data, isMuted }) => {
       if (age >= 0 && age < 2 && activeRippleCount < 5) {
         rippleUniforms.current.uRippleCenters.value[activeRippleCount].copy(rip.center);
         rippleUniforms.current.uRippleStartTimes.value[activeRippleCount] = ripTime;
-        let intensity = 0.3;
+        let intensity = 0.15;
         if (rip.duration > 200) {
           const factor = Math.min((rip.duration - 200) / 400, 1);
-          intensity = 0.3 + factor * 0.5;
+          intensity = 0.15 + factor * 0.3;
         }
         rippleUniforms.current.uRippleIntensities.value[activeRippleCount] = intensity;
         activeRippleCount++;
