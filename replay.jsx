@@ -150,7 +150,7 @@ const ReplayScene = ({ data, isMuted }) => {
                     totalRipple += getRipple(i, vWorldPos);
                 }
                 if (abs(totalRipple) > 0.01) {
-                    float strength = smoothstep(0.0, 1.0, abs(totalRipple));
+                    float strength = smoothstep(0.0, 0.5, abs(totalRipple));
                     vec3 rippleColor = vec3(0.7, 0.9, 1.0);
                     gl_FragColor.rgb = mix(gl_FragColor.rgb, rippleColor, strength * 0.4);
                     gl_FragColor.rgb += rippleColor * strength * 0.2;
@@ -242,10 +242,10 @@ const ReplayScene = ({ data, isMuted }) => {
       if (age >= 0 && age < 2 && activeRippleCount < 5) {
         rippleUniforms.current.uRippleCenters.value[activeRippleCount].copy(rip.center);
         rippleUniforms.current.uRippleStartTimes.value[activeRippleCount] = ripTime;
-        let intensity = 0.8;
+        let intensity = 0.3;
         if (rip.duration > 200) {
           const factor = Math.min((rip.duration - 200) / 400, 1);
-          intensity = 0.8 + factor * 1.2;
+          intensity = 0.3 + factor * 0.5;
         }
         rippleUniforms.current.uRippleIntensities.value[activeRippleCount] = intensity;
         activeRippleCount++;

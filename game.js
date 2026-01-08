@@ -187,7 +187,7 @@ export class Game {
                     totalRipple += getRipple(i, vWorldPos);
                 }
                 if (abs(totalRipple) > 0.01) {
-                    float strength = smoothstep(0.0, 1.0, abs(totalRipple));
+                    float strength = smoothstep(0.0, 0.5, abs(totalRipple));
                     vec3 rippleColor = vec3(0.7, 0.9, 1.0);
                     gl_FragColor.rgb = mix(gl_FragColor.rgb, rippleColor, strength * 0.4);
                     gl_FragColor.rgb += rippleColor * strength * 0.2;
@@ -255,12 +255,12 @@ export class Game {
         this.rippleUniforms.uRippleStartTimes.value[idx] = this.time;
         
         // Intensity logic based on hold duration
-        // Short tap (<200ms) -> 0.8
-        // Long tap (>600ms) -> 2.0
-        let intensity = 0.8;
+        // Short tap (<200ms) -> 0.3
+        // Long tap (>600ms) -> 0.8
+        let intensity = 0.3;
         if (durationMs > 200) {
             const factor = Math.min((durationMs - 200) / 400, 1.0);
-            intensity = 0.8 + factor * 1.2;
+            intensity = 0.3 + factor * 0.5;
         }
         
         this.rippleUniforms.uRippleIntensities.value[idx] = intensity;
