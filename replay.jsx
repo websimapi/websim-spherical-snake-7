@@ -6,28 +6,38 @@ import { AbsoluteFill, useCurrentFrame, useVideoConfig, Audio, Sequence } from "
 import * as THREE from "three";
 const ReplayScene = ({ data, isMuted }) => {
   const frameIndex = useCurrentFrame();
-  const { width, height } = useVideoConfig();
+  const { width, height, fps } = useVideoConfig();
   const containerRef = useRef(null);
   const [avatarSrc, setAvatarSrc] = useState(null);
-  const audioCues = useMemo(() => {
+  const { audioCues, rippleEvents } = useMemo(() => {
     const cues = [];
-    if (!data || !data.frames) return cues;
+    const ripples = [];
+    if (!data || !data.frames) return { audioCues: cues, rippleEvents: ripples };
     data.frames.forEach((frame, idx) => {
       if (frame.events && frame.events.length > 0) {
-        frame.events.forEach((soundName, i) => {
-          const url = data.config.sounds && data.config.sounds[soundName];
+        frame.events.forEach((evt, i) => {
+          const name = typeof evt === "string" ? evt : evt.name;
+          const payload = typeof evt === "string" ? null : evt.payload;
+          const url = data.config.sounds && data.config.sounds[name];
           if (url) {
             cues.push({
-              id: `sfx-${idx}-${i}-${soundName}`,
+              id: `sfx-${idx}-${i}-${name}`,
               frame: idx,
               src: url,
-              name: soundName
+              name
+            });
+          }
+          if (name === "ripple" && payload) {
+            ripples.push({
+              frame: idx,
+              center: new THREE.Vector3().fromArray(payload.center),
+              duration: payload.duration
             });
           }
         });
       }
     });
-    return cues;
+    return { audioCues: cues, rippleEvents: ripples };
   }, [data]);
   const activeCues = audioCues.filter((cue) => {
     const duration = cue.name === "die" ? 150 : 30;
@@ -36,12 +46,18 @@ const ReplayScene = ({ data, isMuted }) => {
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
+  const rippleUniforms = useRef({
+    uTime: { value: 0 },
+    uRippleCenters: { value: new Array(5).fill().map(() => new THREE.Vector3()) },
+    uRippleStartTimes: { value: new Array(5).fill(-1e3) },
+    uRippleIntensities: { value: new Array(5).fill(0) }
+  });
   const objectsRef = useRef({
     earth: null,
     head: null,
+    tongue: null,
     food: null,
     bonusFoods: [],
-    // Array of meshes
     segments: [],
     cameraRig: null
   });
@@ -79,6 +95,68 @@ const ReplayScene = ({ data, isMuted }) => {
       roughness: 0.9,
       side: THREE.DoubleSide
     });
+    earthMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = rippleUniforms.current.uTime;
+      shader.uniforms.uRippleCenters = rippleUniforms.current.uRippleCenters;
+      shader.uniforms.uRippleStartTimes = rippleUniforms.current.uRippleStartTimes;
+      shader.uniforms.uRippleIntensities = rippleUniforms.current.uRippleIntensities;
+      shader.vertexShader = `varying vec3 vWorldPos;
+` + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <worldpos_vertex>",
+        `#include <worldpos_vertex>
+                vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+      );
+      const rippleFunc = `
+                uniform float uTime;
+                uniform vec3 uRippleCenters[5];
+                uniform float uRippleStartTimes[5];
+                uniform float uRippleIntensities[5];
+                varying vec3 vWorldPos;
+
+                float getRipple(int i, vec3 pos) {
+                    float startTime = uRippleStartTimes[i];
+                    if (startTime < 0.0) return 0.0;
+                    
+                    float age = uTime - startTime;
+                    if (age < 0.0 || age > 2.0) return 0.0; // Lifetime 2s
+                    
+                    vec3 center = uRippleCenters[i];
+                    float intensity = uRippleIntensities[i];
+                    
+                    float dotProd = dot(normalize(pos), normalize(center));
+                    float angle = acos(clamp(dotProd, -1.0, 1.0));
+                    float dist = angle * 10.0; // approx distance on sphere radius 10
+                    
+                    float speed = 8.0; 
+                    float waveCenter = age * speed;
+                    float distDiff = dist - waveCenter;
+                    
+                    float ripple = 0.0;
+                    if (abs(distDiff) < 2.0) {
+                        ripple = sin(distDiff * 3.0) * exp(-distDiff * distDiff);
+                    }
+                    ripple *= (1.0 - age / 2.0);
+                    ripple *= intensity;
+                    return ripple;
+                }
+            `;
+      shader.fragmentShader = rippleFunc + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <dithering_fragment>",
+        `#include <dithering_fragment>
+                float totalRipple = 0.0;
+                for(int i=0; i<5; i++) {
+                    totalRipple += getRipple(i, vWorldPos);
+                }
+                if (abs(totalRipple) > 0.01) {
+                    float strength = smoothstep(0.0, 1.0, abs(totalRipple));
+                    vec3 rippleColor = vec3(0.7, 0.9, 1.0);
+                    gl_FragColor.rgb = mix(gl_FragColor.rgb, rippleColor, strength * 0.4);
+                    gl_FragColor.rgb += rippleColor * strength * 0.2;
+                }`
+      );
+    };
     const earth = new THREE.Mesh(earthGeo, earthMat);
     scene.add(earth);
     const atmGeo = new THREE.SphereGeometry(r * 1.03, 64, 64);
@@ -92,6 +170,37 @@ const ReplayScene = ({ data, isMuted }) => {
     const headGeo = new THREE.BoxGeometry(0.8, 0.4, 0.8);
     const headMat = new THREE.MeshStandardMaterial({ color: 65280, emissive: 17408 });
     const head = new THREE.Mesh(headGeo, headMat);
+    const eyeGeo = new THREE.SphereGeometry(0.12, 16, 16);
+    const eyeWhiteMat = new THREE.MeshStandardMaterial({
+      color: 16777215,
+      emissive: 2236962,
+      emissiveIntensity: 0.2,
+      roughness: 0.2,
+      metalness: 0
+    });
+    const pupilGeo = new THREE.SphereGeometry(0.06, 12, 12);
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0, roughness: 0 });
+    const highlightGeo = new THREE.SphereGeometry(0.025, 8, 8);
+    const highlightMat = new THREE.MeshBasicMaterial({ color: 16777215 });
+    const createEye = (x) => {
+      const eye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
+      eye.position.set(x, 0.15, 0.25);
+      const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+      pupil.position.set(Math.sign(x) * 0.05, 0.02, 0.09);
+      eye.add(pupil);
+      const hl = new THREE.Mesh(highlightGeo, highlightMat);
+      hl.position.set(Math.sign(x) * 0.02, 0.03, 0.05);
+      pupil.add(hl);
+      return eye;
+    };
+    head.add(createEye(0.22));
+    head.add(createEye(-0.22));
+    const tongueGeo = new THREE.BoxGeometry(0.08, 0.02, 0.6);
+    const tongueMat = new THREE.MeshStandardMaterial({ color: 16724838, emissive: 6684689, emissiveIntensity: 0.5 });
+    const tongue = new THREE.Mesh(tongueGeo, tongueMat);
+    tongue.position.set(0, -0.1, 0.4);
+    tongue.scale.set(1, 1, 0.01);
+    head.add(tongue);
     scene.add(head);
     const foodGeo = new THREE.SphereGeometry(0.5, 16, 16);
     const foodMat = new THREE.MeshStandardMaterial({ color: 16755200, emissive: 16711680, emissiveIntensity: 0.5 });
@@ -100,6 +209,7 @@ const ReplayScene = ({ data, isMuted }) => {
     objectsRef.current = {
       earth,
       head,
+      tongue,
       food,
       bonusFoods: [],
       segments: [],
@@ -122,9 +232,31 @@ const ReplayScene = ({ data, isMuted }) => {
     if (safeIndex < 0) return;
     const frameData = data.frames[safeIndex];
     const objs = objectsRef.current;
+    const currentTime = safeIndex / fps;
+    rippleUniforms.current.uTime.value = currentTime;
+    let activeRippleCount = 0;
+    for (let i = 0; i < 5; i++) rippleUniforms.current.uRippleStartTimes.value[i] = -1e3;
+    for (const rip of rippleEvents) {
+      const ripTime = rip.frame / fps;
+      const age = currentTime - ripTime;
+      if (age >= 0 && age < 2 && activeRippleCount < 5) {
+        rippleUniforms.current.uRippleCenters.value[activeRippleCount].copy(rip.center);
+        rippleUniforms.current.uRippleStartTimes.value[activeRippleCount] = ripTime;
+        let intensity = 0.8;
+        if (rip.duration > 200) {
+          const factor = Math.min((rip.duration - 200) / 400, 1);
+          intensity = 0.8 + factor * 1.2;
+        }
+        rippleUniforms.current.uRippleIntensities.value[activeRippleCount] = intensity;
+        activeRippleCount++;
+      }
+    }
     if (!objs.head || !objs.food) return;
     objs.head.position.fromArray(frameData.head.pos);
     objs.head.quaternion.fromArray(frameData.head.quat);
+    if (objs.tongue && frameData.tongue) {
+      objs.tongue.scale.set(frameData.tongue.scaleX, 1, frameData.tongue.scaleZ);
+    }
     objs.food.position.fromArray(frameData.food);
     const bonusData = frameData.bonusFoods || [];
     while (objs.bonusFoods.length < bonusData.length) {
@@ -180,26 +312,18 @@ const ReplayScene = ({ data, isMuted }) => {
       cameraRef.current.position.fromArray(frameData.camera.pos);
       cameraRef.current.quaternion.fromArray(frameData.camera.quat);
       cameraRef.current.up.fromArray(frameData.camera.up);
-    } else if (cameraRef.current) {
-      const headPos = objs.head.position.clone();
-      const idealCameraPos = headPos.clone().normalize().multiplyScalar(30);
-      const cam = cameraRef.current;
-      cam.position.lerp(idealCameraPos, 0.1);
-      cam.lookAt(0, 0, 0);
-      const snakeForward = new THREE.Vector3(0, 0, 1).applyQuaternion(objs.head.quaternion);
-      cam.up.copy(snakeForward);
     }
     if (rendererRef.current && sceneRef.current && cameraRef.current) {
       rendererRef.current.render(sceneRef.current, cameraRef.current);
     }
-  }, [frameIndex, data]);
+  }, [frameIndex, data, fps]);
   const currentFrameData = data.frames[Math.min(Math.floor(frameIndex), data.frames.length - 1)] || {};
   const score = currentFrameData.score || 0;
   const playerInfo = data.config.playerInfo || { username: "Player", avatarUrl: "./default_avatar.png" };
   return /* @__PURE__ */ jsxDEV(AbsoluteFill, { children: [
     /* @__PURE__ */ jsxDEV("div", { ref: containerRef, style: { width: "100%", height: "100%" } }, void 0, false, {
       fileName: "<stdin>",
-      lineNumber: 271,
+      lineNumber: 406,
       columnNumber: 13
     }),
     /* @__PURE__ */ jsxDEV("div", { style: {
@@ -240,7 +364,7 @@ const ReplayScene = ({ data, isMuted }) => {
           false,
           {
             fileName: "<stdin>",
-            lineNumber: 290,
+            lineNumber: 425,
             columnNumber: 21
           }
         ),
@@ -258,12 +382,12 @@ const ReplayScene = ({ data, isMuted }) => {
           whiteSpace: "nowrap"
         }, children: playerInfo.username }, void 0, false, {
           fileName: "<stdin>",
-          lineNumber: 306,
+          lineNumber: 441,
           columnNumber: 21
         })
       ] }, void 0, true, {
         fileName: "<stdin>",
-        lineNumber: 284,
+        lineNumber: 419,
         columnNumber: 17
       }),
       /* @__PURE__ */ jsxDEV("div", { style: {
@@ -275,29 +399,29 @@ const ReplayScene = ({ data, isMuted }) => {
         marginTop: "10px"
       }, children: score }, void 0, false, {
         fileName: "<stdin>",
-        lineNumber: 322,
+        lineNumber: 457,
         columnNumber: 17
       })
     ] }, void 0, true, {
       fileName: "<stdin>",
-      lineNumber: 274,
+      lineNumber: 409,
       columnNumber: 13
     }),
     activeCues.map((cue) => {
       const duration = cue.name === "die" ? 150 : 30;
       return /* @__PURE__ */ jsxDEV(Sequence, { from: cue.frame, durationInFrames: duration, children: /* @__PURE__ */ jsxDEV(Audio, { src: cue.src, volume: isMuted ? 0 : 1 }, void 0, false, {
         fileName: "<stdin>",
-        lineNumber: 338,
+        lineNumber: 473,
         columnNumber: 25
       }) }, cue.id, false, {
         fileName: "<stdin>",
-        lineNumber: 337,
+        lineNumber: 472,
         columnNumber: 21
       });
     })
   ] }, void 0, true, {
     fileName: "<stdin>",
-    lineNumber: 270,
+    lineNumber: 405,
     columnNumber: 9
   });
 };
@@ -326,7 +450,7 @@ const ReplayContainer = ({ data }) => {
       false,
       {
         fileName: "<stdin>",
-        lineNumber: 355,
+        lineNumber: 490,
         columnNumber: 13
       }
     ),
@@ -358,13 +482,13 @@ const ReplayContainer = ({ data }) => {
       false,
       {
         fileName: "<stdin>",
-        lineNumber: 369,
+        lineNumber: 504,
         columnNumber: 13
       }
     )
   ] }, void 0, true, {
     fileName: "<stdin>",
-    lineNumber: 354,
+    lineNumber: 489,
     columnNumber: 9
   });
 };
@@ -378,7 +502,7 @@ const mountReplay = (containerId, replayData) => {
   replayRoot = createRoot(container);
   replayRoot.render(/* @__PURE__ */ jsxDEV(ReplayContainer, { data: replayData }, void 0, false, {
     fileName: "<stdin>",
-    lineNumber: 409,
+    lineNumber: 544,
     columnNumber: 23
   }));
 };

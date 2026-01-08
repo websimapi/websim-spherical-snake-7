@@ -239,7 +239,7 @@ export class Game {
 
     playSound(name) {
         this.audioManager.play(name);
-        this.recorder.recordEvent(name);
+        this.recorder.recordEvent(name, null);
     }
 
     setTarget(point) {
@@ -265,6 +265,12 @@ export class Game {
         this.rippleUniforms.uRippleIntensities.value[idx] = intensity;
         
         this.currentRippleIdx = (this.currentRippleIdx + 1) % 5;
+
+        // Record for replay
+        this.recorder.recordEvent('ripple', { 
+            center: point.toArray(), 
+            duration: durationMs 
+        });
     }
 
     update(dt) {
@@ -370,6 +376,10 @@ export class Game {
                 color: seg.material.color.getHex()
             })),
             score: this.score,
+            tongue: {
+                scaleX: this.snake.tongue ? this.snake.tongue.scale.x : 1,
+                scaleZ: this.snake.tongue ? this.snake.tongue.scale.z : 0.01
+            },
             events: [] // Filled by recorder
         };
     }

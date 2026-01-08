@@ -12,8 +12,8 @@ export class ReplayRecorder {
         this.accumulator = 0;
     }
 
-    recordEvent(name) {
-        this.frameEvents.push(name);
+    recordEvent(name, payload = null) {
+        this.frameEvents.push({ name, payload });
     }
 
     update(dt, snapshotFn) {
