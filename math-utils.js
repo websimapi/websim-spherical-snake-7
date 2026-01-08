@@ -33,3 +33,46 @@ export function getRandomPointOnSphere(radius) {
     
     return new THREE.Vector3(x, y, z);
 }
+
+/**
+ * Calculates the ripple height offset at a specific position on the sphere.
+ * Matches the logic in the Earth shader.
+ */
+export function getRippleHeight(pos, time, centers, startTimes, intensities, earthRadius = 10.0) {
+    let totalRipple = 0.0;
+    // We need normalized vectors for dot product
+    // pos is expected to be roughly on surface, but we normalize to be safe
+    const pNorm = pos.clone().normalize();
+    
+    for(let i=0; i<5; i++) {
+        const startTime = startTimes[i];
+        if (startTime < 0.0) continue;
+        
+        const age = time - startTime;
+        if (age < 0.0 || age > 2.0) continue;
+        
+        const center = centers[i]; // already a vector
+        // center might not be normalized in storage, so normalize it
+        const cNorm = center.clone().normalize();
+        
+        const dotProd = pNorm.dot(cNorm);
+        const angle = Math.acos(Math.max(-1.0, Math.min(1.0, dotProd)));
+        const dist = angle * earthRadius;
+        
+        const speed = 8.0; 
+        const waveCenter = age * speed;
+        const distDiff = dist - waveCenter;
+        
+        // Wave packet width
+        if (Math.abs(distDiff) < 2.0) {
+            let ripple = Math.sin(distDiff * 3.0) * Math.exp(-distDiff * distDiff);
+            
+            // Fade out
+            ripple *= (1.0 - age / 2.0);
+            ripple *= intensities[i];
+            
+            totalRipple += ripple;
+        }
+    }
+    return totalRipple;
+}

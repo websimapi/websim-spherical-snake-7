@@ -188,7 +188,11 @@ export class Snake {
                this.head.position.clone();
     }
 
-    update(dt, targetPoint) {
+    update(dt, targetPoint, rippleFn) {
+        // 0. Reset head to surface (Physics Step)
+        // We strip any previous visual displacement to ensure physics runs on the sphere
+        this.head.position.setLength(this.EARTH_RADIUS);
+
         // 1. Parallel Transport Movement Logic
         const headPos = this.head.position.clone();
         const surfaceNormal = headPos.clone().normalize();
@@ -197,6 +201,7 @@ export class Snake {
         currentForward.projectOnPlane(surfaceNormal).normalize();
 
         // Steering
+        // Use surface distance for steering logic
         if (targetPoint) {
             const dist = headPos.distanceTo(targetPoint);
             if (dist >= 1.0) {
@@ -220,7 +225,8 @@ export class Snake {
         this.head.position.applyQuaternion(qRot);
         this.head.quaternion.premultiply(qRot);
 
-        // 3. Record History
+        // 3. Record History (Surface Position)
+        // We record the position BEFORE applying ripple displacement
         if (this.pathHistory.length === 0 || 
             this.pathHistory[0].pos.distanceTo(this.head.position) > 0.1) {
             
@@ -235,13 +241,29 @@ export class Snake {
             }
         }
 
-        // 4. Update Segments
+        // 4. Update Segments (To Surface Positions)
         this.updateSegments();
 
-        // 5. Update cute tongue animation
+        // 5. Apply Ripple Physics (Visual Displacement)
+        if (rippleFn) {
+            this.applyRippleDisplacement(this.head, rippleFn);
+            for(const seg of this.segments) {
+                this.applyRippleDisplacement(seg, rippleFn);
+            }
+        }
+
+        // 6. Update cute tongue animation
         this.updateTongue(dt);
 
         return moveDist;
+    }
+
+    applyRippleDisplacement(mesh, rippleFn) {
+        const h = rippleFn(mesh.position);
+        if (Math.abs(h) > 0.01) {
+            // Move along normal (from center 0,0,0)
+            mesh.position.setLength(this.EARTH_RADIUS + h);
+        }
     }
 
     updateSegments() {
@@ -273,9 +295,15 @@ export class Snake {
     }
 
     checkSelfCollision() {
+        // Collision check should ideally ignore wave height to prevent "jumping over" yourself
+        // We compare angular distance on sphere surface
+        const headNorm = this.head.position.clone().normalize();
+        
         // Skip first few segments
         for(let i = 4; i < this.segments.length; i++) {
-            if (this.head.position.distanceTo(this.segments[i].position) < 0.6) {
+            const segNorm = this.segments[i].position.clone().normalize();
+            // Distance on unit sphere * radius
+            if (headNorm.distanceTo(segNorm) * this.EARTH_RADIUS < 0.6) {
                 return true;
             }
         }

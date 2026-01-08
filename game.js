@@ -4,6 +4,7 @@ import { FoodManager } from './food-manager.js';
 import { AudioManager } from './audio-manager.js';
 import { ReplayRecorder } from './replay-recorder.js';
 import { hideLoader } from './loader.js';
+import { getRippleHeight } from './math-utils.js';
 
 export class Game {
     constructor(scene, camera, renderer) {
@@ -279,18 +280,33 @@ export class Game {
 
         if(this.isGameOver) return;
 
+        // Prepare ripple function for entities to use
+        const rippleFn = (pos) => {
+            return getRippleHeight(
+                pos,
+                this.time,
+                this.rippleUniforms.uRippleCenters.value,
+                this.rippleUniforms.uRippleStartTimes.value,
+                this.rippleUniforms.uRippleIntensities.value,
+                this.EARTH_RADIUS
+            );
+        };
+
         // 1. Update Snake
         // removed movement logic block - delegated to Snake.update
-        const moveDist = this.snake.update(dt, this.targetPoint);
+        const moveDist = this.snake.update(dt, this.targetPoint, rippleFn);
         if (moveDist > 0 && this.targetPoint && this.snake.head.position.distanceTo(this.targetPoint) < 1.0) {
             this.targetPoint = null;
         }
 
         // 2. Update Food Manager (Pulse anims, Bonus spawning)
         // removed bonus spawn logic - delegated to FoodManager
-        this.foodManager.update(moveDist, this.snake.getTailPosition());
+        this.foodManager.update(moveDist, this.snake.getTailPosition(), rippleFn);
 
         // 3. Collision Checks
+        // We need to pass the "logic" position (surface level) or handle it inside
+        // Since snake.head.position is now visually displaced, we should normalize for collision checks
+        // or checkCollision can handle it.
         const collisions = this.foodManager.checkCollisions(this.snake.head.position);
         
         if (collisions.mainFood) {

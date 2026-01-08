@@ -79,9 +79,15 @@ export class FoodManager {
         this.bonusFoods.push(mesh);
     }
 
-    update(moveDist, snakeTailPos) {
+    update(moveDist, snakeTailPos, rippleFn) {
         // Pulse main food
         this.food.scale.setScalar(1 + Math.sin(Date.now() * 0.01) * 0.2);
+
+        // Apply Ripple Physics to Food
+        if (rippleFn) {
+            this.applyRippleToFood(this.food, rippleFn);
+            this.bonusFoods.forEach(b => this.applyRippleToFood(b, rippleFn));
+        }
 
         // Handle Bonus Spawning
         if (this.bonusSpawnQueue > 0) {
@@ -96,21 +102,38 @@ export class FoodManager {
         }
     }
     
+    applyRippleToFood(mesh, rippleFn) {
+        // Reset to surface first
+        mesh.position.setLength(this.EARTH_RADIUS);
+        // Calculate offset
+        const h = rippleFn(mesh.position);
+        if (Math.abs(h) > 0.01) {
+            mesh.position.setLength(this.EARTH_RADIUS + h);
+        }
+    }
+    
     checkCollisions(snakeHeadPos) {
         const results = {
             mainFood: false,
             bonusIndices: []
         };
 
+        // Use Normalized positions for reliable collision even during jumps
+        const headNorm = snakeHeadPos.clone().normalize();
+        const foodNorm = this.food.position.clone().normalize();
+
         // Main Food
-        if (snakeHeadPos.distanceTo(this.food.position) < 1.5) {
+        // Use angular distance approximation: dist on unit sphere * Radius
+        if (headNorm.distanceTo(foodNorm) * this.EARTH_RADIUS < 1.5) {
             results.mainFood = true;
         }
 
         // Bonus Foods
         for (let i = this.bonusFoods.length - 1; i >= 0; i--) {
             const bonus = this.bonusFoods[i];
-            if (snakeHeadPos.distanceTo(bonus.position) < 1.2) {
+            const bonusNorm = bonus.position.clone().normalize();
+            
+            if (headNorm.distanceTo(bonusNorm) * this.EARTH_RADIUS < 1.2) {
                 results.bonusIndices.push(i);
             }
         }
